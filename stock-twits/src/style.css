@@ -1,0 +1,196 @@
+:root {
+  color-scheme: light;
+  --bg: #e9e6dd;
+  --panel: #f6f4ee;
+  --border: #d8d3c4;
+  --text: #33312c;
+  --muted: #7c7669;
+  --accent: #0d94a1;
+  --bull: #327a52;
+  --bear: #b2453f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-size: 1.4em;
+}
+.brand strong {
+  color: var(--accent);
+}
+
+.ticker-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.95em;
+}
+.ticker-symbol {
+  font-weight: bold;
+  letter-spacing: 0.05em;
+}
+.ticker-price.up {
+  color: var(--bull);
+}
+.ticker-price.down {
+  color: var(--bear);
+}
+.ticker-date,
+.ticker-count {
+  color: var(--muted);
+}
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#chart {
+  position: fixed;
+  top: 60px;
+  left: calc(50% - 400px);
+  z-index: 1000;
+  width: fit-content;
+  margin: 20px auto;
+  padding: 36px 16px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(51, 49, 44, 0.08);
+  gap: 8px;
+}
+
+.chart-svg {
+  height: 220px;
+  display: block;
+  cursor: crosshair;
+}
+.chart-area {
+  fill: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.chart-marker {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.chart-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.chart-label-end {
+  text-anchor: end;
+}
+
+.hint {
+  margin: 6px 20px;
+  color: var(--muted);
+  font-size: 0.85em;
+  text-align: center;
+}
+
+#tiles {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.tile {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(51, 49, 44, 0.1);
+  cursor: pointer;
+  overflow: hidden;
+  /* Opacity/filter are driven per-frame from JS (depth fog) — no CSS
+     transition on them, or it would fight the continuous updates. */
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+  /* Promote each tile to its own compositor layer so per-frame position
+     updates are pure GPU transforms, not style recalc/repaint. Clicks no
+     longer depend on the tile itself being a native hit-test target (see
+     FloatingTiles.onContainerClick), so this is safe to keep. */
+  will-change: transform, opacity;
+}
+.tile:hover {
+  border-color: var(--accent);
+}
+.tile--bullish {
+  border-left: 3px solid var(--bull);
+}
+.tile--bearish {
+  border-left: 3px solid var(--bear);
+}
+.tile--dim {
+  pointer-events: none;
+}
+.tile--focused {
+  box-shadow: 0 12px 32px rgba(51, 49, 44, 0.28);
+  border-color: var(--accent);
+  cursor: default;
+}
+
+.tile-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.tile--bullish .tile-sentiment {
+  color: var(--bull);
+}
+.tile--bearish .tile-sentiment {
+  color: var(--bear);
+}
+
+.tile-body {
+  font-size: 0.95em;
+  line-height: 1.4;
+}
+
+.tile-footer {
+  margin-top: 10px;
+  font-size: 0.75em;
+  color: var(--muted);
+}

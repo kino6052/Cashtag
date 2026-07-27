@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CASHtag &mdash; StockTwits Previewer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="header">
+        <div class="brand"><strong>CASH</strong><span>tag</span></div>
+        <div id="ticker-info" class="ticker-info"></div>
+      </header>
+
+      <main>
+        <section id="chart" aria-label="Stock price chart"></section>
+        <p class="hint">Click a point on the chart to load twits from that day.</p>
+        <div id="tiles" aria-label="Twits"></div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

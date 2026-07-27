@@ -1,19 +1,20 @@
 {
-  "name": "rouxmeet",
-  "version": "0.0.1",
+  "name": "cashtag",
+  "version": "1.0.0",
   "private": true,
+  "description": "Static previewer for StockTwits-style messages alongside a price chart",
+  "type": "module",
   "scripts": {
-    "start": "node ./bin/www"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "body-parser": "~1.0.0",
-    "cookie-parser": "~1.0.1",
-    "debug": "~0.7.4",
-    "ejs": "~0.8.5",
-    "express": "~4.0.0",
-    "mongodb": "^2.0.25",
-    "mongoose": "^4.0.0",
-    "morgan": "~1.0.0",
-    "static-favicon": "~1.0.0"
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
   }
 }
