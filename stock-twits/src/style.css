@@ -78,8 +78,8 @@ main {
 
 #chart {
   position: fixed;
-  top: 60px;
-  left: calc(50% - 400px);
+  bottom: 0px;
+  left: 0px;
   z-index: 1000;
   width: fit-content;
   margin: 20px auto;
@@ -89,6 +89,7 @@ main {
   border-radius: 14px;
   box-shadow: 0 2px 10px rgba(51, 49, 44, 0.08);
   gap: 8px;
+  transform: scale(0.7);
 }
 
 .chart-svg {

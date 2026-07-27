@@ -24,6 +24,22 @@ const FOG_MIN_ALPHA = 0.12;
 const FOG_BLUR_BUCKETS = 4;
 const FOG_MAX_BLUR_PX = 5;
 
+/**
+ * How close to the camera (z -> 0) a tile is allowed to drift before it's
+ * recycled. CSS 3D perspective scaling blows up as z approaches 0 — left
+ * unchecked, tiles balloon to grotesque size right before wrapping, then
+ * the old code hard-teleported position.z by TUNNEL_DEPTH in one frame.
+ * That combo of "huge" then "instantly gone" is what reads as flicker.
+ */
+const WRAP_NEAR_Z = -220;
+const RECYCLE_FADE_OUT_MS = 160;
+const RECYCLE_FADE_IN_MS = 380;
+
+/** CSS3DRenderer paints tiles in DOM order, not by actual depth, so overlapping
+ * tiles can occlude each other incorrectly. Periodically re-append active tiles
+ * back-to-front so paint order matches distance from the camera. */
+const DEPTH_SORT_INTERVAL_FRAMES = 6;
+
 function clamp01(t: number): number {
   return Math.min(1, Math.max(0, t));
 }
@@ -33,6 +49,8 @@ interface ActiveTween {
   duration: number;
   update: (t: number) => void;
   onComplete?: () => void;
+  /** Tags which slot this tween animates, so a new tween on the same slot can cancel it instead of racing it. */
+  slot?: PoolSlot;
 }
 
 interface PoolSlot {
@@ -47,6 +65,8 @@ interface PoolSlot {
   dimmed: boolean;
   /** Quantized blur level, cached so the (comparatively expensive) filter is only rewritten when it changes. */
   blurBucket: number;
+  /** True while being faded out/repositioned/faded back in by the tunnel-wrap recycle; moveTunnel skips it meanwhile. */
+  recycling: boolean;
 }
 
 interface FocusState {
@@ -82,6 +102,7 @@ export class FloatingTiles {
   private activeCount = 0;
   private focused: FocusState | null = null;
   private frameId = 0;
+  private frameCount = 0;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -128,6 +149,7 @@ export class FloatingTiles {
       revealAlpha: 0,
       dimmed: false,
       blurBucket: -1,
+      recycling: false,
     };
 
     return slot;
@@ -168,6 +190,10 @@ export class FloatingTiles {
 
     for (let i = 0; i < outgoingCount; i++) {
       const slot = this.pool[i];
+      // Cancel anything still animating this slot (e.g. a mid-flight tunnel
+      // recycle) so it can't race the fall-out/fall-in tweens below.
+      this.cancelTweensFor(slot);
+      slot.recycling = false;
       const fromY = slot.object.position.y;
       const toY = fromY - 2600;
       const stillNeeded = i < count;
@@ -180,6 +206,7 @@ export class FloatingTiles {
           this.updateTileVisual(slot);
         },
         {
+          slot,
           delay: i * staggerOut,
           onComplete: () => {
             if (!stillNeeded) slot.object.visible = false;
@@ -204,6 +231,11 @@ export class FloatingTiles {
     index: number,
     delay: number,
   ): void {
+    // Cancel any tween still in flight for this slot (e.g. the fall-out
+    // tween just queued above for a reused index) so they can't race.
+    this.cancelTweensFor(slot);
+    slot.recycling = false;
+
     slot.el.className = `tile tile--${twit.sentiment?.toLowerCase() ?? "neutral"}`;
     slot.userEl.textContent = `@${twit.username}`;
     slot.sentimentEl.textContent = twit.sentiment ?? "";
@@ -229,7 +261,7 @@ export class FloatingTiles {
         slot.revealAlpha = Math.min(1, t * 2);
         this.updateTileVisual(slot);
       },
-      { delay },
+      { slot, delay },
     );
   }
 
@@ -263,6 +295,8 @@ export class FloatingTiles {
     if (this.focused) this.restoreFocused();
 
     const slot = this.pool[slotIndex];
+    this.cancelTweensFor(slot);
+    slot.recycling = false;
     this.focused = {
       slotIndex,
       original: {
@@ -291,13 +325,14 @@ export class FloatingTiles {
       const s = 2 * (from.s + (to.s - from.s) * e);
       obj.scale.set(s, s, s);
       this.updateTileVisual(slot);
-    });
+    }, { slot });
   }
 
   private restoreFocused(): void {
     if (!this.focused) return;
     const { slotIndex, original } = this.focused;
     const slot = this.pool[slotIndex];
+    this.cancelTweensFor(slot);
     slot.el.classList.remove("tile--focused");
     this.setOthersDimmed(slotIndex, false);
 
@@ -316,7 +351,7 @@ export class FloatingTiles {
       const s = from.s + (1 - from.s) * e;
       obj.scale.set(s, s, s);
       this.updateTileVisual(slot);
-    });
+    }, { slot });
     this.focused = null;
   }
 
@@ -388,25 +423,94 @@ export class FloatingTiles {
   private moveTunnel(delta: number): void {
     for (let i = 0; i < this.activeCount; i++) {
       const slot = this.pool[i];
+      if (slot.recycling) continue;
       const object = slot.object;
       object.position.z += delta;
-      if (object.position.z > 0) object.position.z -= TUNNEL_DEPTH;
-      else if (object.position.z < -TUNNEL_DEPTH)
-        object.position.z += TUNNEL_DEPTH;
+      if (object.position.z > WRAP_NEAR_Z) {
+        this.recycleTile(slot);
+        continue;
+      }
+      // The far end is already almost fully fogged out (see FOG_FAR), so an
+      // instant reposition there is imperceptible — only the near/camera
+      // crossing (handled above) needs the fade-based recycle.
+      if (object.position.z < -TUNNEL_DEPTH) object.position.z += TUNNEL_DEPTH;
       this.updateTileVisual(slot);
     }
+  }
+
+  /**
+   * Recycles a tile that's drifted too close to the camera: fades it out,
+   * repositions it to the far end of the tunnel while invisible, then fades
+   * it back in. Replaces the old instant position teleport, which visibly
+   * flickered — a tile ballooning to huge size right at the camera, then
+   * vanishing to the far end in a single frame.
+   */
+  private recycleTile(slot: PoolSlot): void {
+    this.cancelTweensFor(slot);
+    slot.recycling = true;
+
+    this.tween(
+      RECYCLE_FADE_OUT_MS,
+      (t) => {
+        slot.revealAlpha = 1 - t;
+        this.updateTileVisual(slot);
+      },
+      {
+        slot,
+        onComplete: () => {
+          slot.object.position.x = Math.random() * 5000 - 2500;
+          slot.object.position.y = Math.random() * 2000 - 1000;
+          slot.object.position.z = -TUNNEL_DEPTH + Math.random() * 400;
+          this.updateTileVisual(slot);
+
+          this.tween(
+            RECYCLE_FADE_IN_MS,
+            (t) => {
+              slot.revealAlpha = t;
+              this.updateTileVisual(slot);
+            },
+            {
+              slot,
+              onComplete: () => {
+                slot.recycling = false;
+              },
+            },
+          );
+        },
+      },
+    );
+  }
+
+  /**
+   * CSS3DRenderer paints tiles in DOM order (fixed at first appearance),
+   * not by depth, so overlapping tiles can occlude each other incorrectly
+   * as they move. Re-append active tiles back-to-front so paint order
+   * tracks actual distance from the camera. Runs on an interval rather
+   * than every frame since it's a purely cosmetic correction.
+   */
+  private sortDepth(): void {
+    const active = this.pool.slice(0, this.activeCount);
+    active.sort((a, b) => a.object.position.z - b.object.position.z);
+    for (const slot of active) {
+      slot.el.parentElement?.appendChild(slot.el);
+    }
+  }
+
+  private cancelTweensFor(slot: PoolSlot): void {
+    this.tweens = this.tweens.filter((tw) => tw.slot !== slot);
   }
 
   private tween(
     duration: number,
     update: (t: number) => void,
-    opts: { delay?: number; onComplete?: () => void } = {},
+    opts: { delay?: number; onComplete?: () => void; slot?: PoolSlot } = {},
   ): void {
     this.tweens.push({
       startAt: performance.now() + (opts.delay ?? 0),
       duration,
       update,
       onComplete: opts.onComplete,
+      slot: opts.slot,
     });
   }
 
@@ -440,5 +544,8 @@ export class FloatingTiles {
     if (this.autoScroll) this.moveTunnel(AUTO_SCROLL_SPEED);
 
     this.renderer.render(this.scene, this.camera);
+
+    this.frameCount++;
+    if (this.frameCount % DEPTH_SORT_INTERVAL_FRAMES === 0) this.sortDepth();
   };
 }
